@@ -15,7 +15,7 @@ export default function Home() {
 
   const fetchHistory = async () => {
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/dividends");
+      const res = await fetch("https://diviflow-backend.onrender.com/api/dividends");
       const json = await res.json();
       if (json.status === "success") {
         setHistory(json.data);
