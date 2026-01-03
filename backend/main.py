@@ -15,7 +15,10 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 app = FastAPI()
 
-origins = ["*"]
+origins = [
+    "http://localhost:3000",
+    "https://diviflow-alpha.vercel.app"  # <--- Deine Vercel-Adresse (aus deinem Screenshot)
+]
 
 app.add_middleware(
     CORSMiddleware,
