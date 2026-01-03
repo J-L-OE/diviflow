@@ -1,0 +1,14 @@
+# Python Müll
+__pycache__/
+*.py[cod]
+venv/
+.env
+
+# Mac Müll
+.DS_Store
+
+# Node/Next.js Müll
+node_modules/
+.next/
+out/
+build/
