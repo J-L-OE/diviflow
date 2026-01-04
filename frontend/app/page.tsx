@@ -11,7 +11,6 @@ export default function Dashboard() {
   const [uploading, setUploading] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   
-  // Supabase & Router initialisieren
   const supabase = createClient()
   const router = useRouter()
 
@@ -25,7 +24,7 @@ export default function Dashboard() {
     if (data) setDividends(data)
   }
 
-  // User checken beim Start
+  // User Session prüfen
   useEffect(() => {
     const getUser = async () => {
       const { data: { user } } = await supabase.auth.getUser()
@@ -35,13 +34,13 @@ export default function Dashboard() {
     getUser()
   }, [])
 
-  // Logout Funktion
+  // Logout
   const handleLogout = async () => {
     await supabase.auth.signOut()
     router.refresh() 
   }
 
-  // Löschen Funktion
+  // Löschen
   const handleDelete = async (id: string) => {
     if (!confirm('Diesen Eintrag wirklich löschen?')) return
 
@@ -56,7 +55,7 @@ export default function Dashboard() {
     }
   }
 
-  // Datei Upload Funktion
+  // Datei Upload
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -85,12 +84,11 @@ export default function Dashboard() {
       alert('Fehler: ' + error.message)
     } finally {
       setUploading(false)
-      // Input zurücksetzen trick: Wir leeren einfach den Wert des Events, falls möglich
-      e.target.value = ''
+      e.target.value = '' // Reset Input damit man die gleiche Datei nochmal wählen kann
     }
   }
 
-  // Berechnungen für UI
+  // UI Berechnungen
   const totalAmount = dividends.reduce((sum, item) => sum + (item.amount || 0), 0)
 
   const chartData = dividends.map(item => ({
@@ -128,19 +126,30 @@ export default function Dashboard() {
             <p className="mt-2 text-3xl font-bold text-gray-900">{dividends.length}</p>
           </div>
           
-          {/* DER NEUE UPLOAD BUTTON (Mobile Safe) */}
-          <label className="flex items-center justify-center rounded-xl bg-blue-50 p-6 border-2 border-dashed border-blue-200 hover:bg-blue-100 transition-colors cursor-pointer relative">
-             <input 
-                type="file" 
-                onChange={handleFileChange} 
-                className="hidden" 
-                accept="application/pdf, image/*" 
-             />
+          {/* --- STABILER MOBILE UPLOAD FIX START --- */}
+          {/* 1. Der versteckte Input (Technik) */}
+          <input 
+            id="file-upload" 
+            type="file" 
+            onChange={handleFileChange} 
+            className="hidden" 
+            accept="application/pdf" 
+          />
+
+          {/* 2. Das sichtbare Label (Optik) - Verknüpft via htmlFor */}
+          <label 
+            htmlFor="file-upload" 
+            className={`flex items-center justify-center rounded-xl p-6 border-2 border-dashed transition-colors cursor-pointer relative ${
+              uploading ? 'bg-gray-50 border-gray-300' : 'bg-blue-50 border-blue-200 hover:bg-blue-100'
+            }`}
+          >
              <div className="flex flex-col items-center text-blue-600">
                 <span className="text-2xl mb-1">{uploading ? '⏳' : '📄'}</span>
-                <span className="font-medium">{uploading ? 'Verarbeite...' : 'PDF/Bild Hochladen'}</span>
+                <span className="font-medium">{uploading ? 'Verarbeite...' : 'PDF Hochladen'}</span>
              </div>
           </label>
+          {/* --- STABILER MOBILE UPLOAD FIX ENDE --- */}
+
         </div>
 
         {/* Diagramm */}
@@ -186,7 +195,7 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Die Liste */}
+        {/* Liste */}
         <div className="rounded-xl bg-white shadow-sm border border-gray-100 overflow-hidden">
           <div className="px-6 py-4 border-b border-gray-100">
             <h3 className="text-lg font-medium text-gray-900">Zahlungshistorie</h3>
