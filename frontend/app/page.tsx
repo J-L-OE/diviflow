@@ -55,25 +55,47 @@ export default function Dashboard() {
     }
   }
 
-  // Datei Upload
+  // --- NEU: Hilfsfunktion für Base64 Umwandlung ---
+  const fileToBase64 = (file: File) => {
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.readAsDataURL(file)
+      reader.onload = () => resolve(reader.result as string)
+      reader.onerror = error => reject(error)
+    })
+  }
+
+  // --- NEU: Upload Funktion (Mobile Safe via JSON) ---
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
 
     setUploading(true)
     setMessage(null)
-    const formData = new FormData()
-    formData.append('file', file)
 
     try {
-      const response = await fetch('/api/upload', { method: 'POST', body: formData })
+      // 1. Datei in Text umwandeln (Base64)
+      const base64File = await fileToBase64(file)
+
+      // 2. Als JSON senden (statt FormData) - das ist stabiler auf iOS
+      const response = await fetch('/api/upload', { 
+        method: 'POST', 
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ 
+          fileData: base64File,
+          fileName: file.name
+        }) 
+      })
+
       const result = await response.json()
       
       if (result.message && result.message.includes('⚠️')) {
          setMessage(result.message)
          setTimeout(() => setMessage(null), 5000)
       } else if (!response.ok) {
-        throw new Error(result.error)
+        throw new Error(result.error || 'Upload fehlgeschlagen')
       } else {
         fetchDividends()
         setMessage("✅ " + result.message)
@@ -81,10 +103,11 @@ export default function Dashboard() {
       }
 
     } catch (error: any) {
+      console.error(error)
       alert('Fehler: ' + error.message)
     } finally {
       setUploading(false)
-      e.target.value = '' // Reset Input damit man die gleiche Datei nochmal wählen kann
+      e.target.value = '' // Reset
     }
   }
 
@@ -126,17 +149,17 @@ export default function Dashboard() {
             <p className="mt-2 text-3xl font-bold text-gray-900">{dividends.length}</p>
           </div>
           
-          {/* --- STABILER MOBILE UPLOAD FIX START --- */}
-          {/* 1. Der versteckte Input (Technik) */}
+          {/* --- STABILER MOBILE UPLOAD --- */}
+          {/* 1. Der versteckte Input */}
           <input 
             id="file-upload" 
             type="file" 
             onChange={handleFileChange} 
             className="hidden" 
-            accept="application/pdf" 
+            accept="application/pdf, image/*" 
           />
 
-          {/* 2. Das sichtbare Label (Optik) - Verknüpft via htmlFor */}
+          {/* 2. Das sichtbare Label */}
           <label 
             htmlFor="file-upload" 
             className={`flex items-center justify-center rounded-xl p-6 border-2 border-dashed transition-colors cursor-pointer relative ${
@@ -148,8 +171,6 @@ export default function Dashboard() {
                 <span className="font-medium">{uploading ? 'Verarbeite...' : 'PDF Hochladen'}</span>
              </div>
           </label>
-          {/* --- STABILER MOBILE UPLOAD FIX ENDE --- */}
-
         </div>
 
         {/* Diagramm */}
@@ -174,60 +195,4 @@ export default function Dashboard() {
                 />
                 <Tooltip 
                   cursor={{fill: '#F3F4F6'}}
-                  contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                  formatter={(value: any) => [`${Number(value).toFixed(2)} €`, 'Betrag']}
-                  labelFormatter={(label) => `Datum: ${label}`}
-                />
-                <Bar dataKey="amount" radius={[4, 4, 0, 0]}>
-                  {chartData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill="#3B82F6" />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        )}
-
-        {/* Status Meldung */}
-        {message && (
-          <div className={`mb-6 p-4 rounded-md border animate-pulse ${message.includes('🗑️') ? 'bg-red-50 text-red-700 border-red-200' : message.includes('⚠️') ? 'bg-yellow-50 text-yellow-700 border-yellow-200' : 'bg-green-50 text-green-700 border-green-200'}`}>
-            {message}
-          </div>
-        )}
-
-        {/* Liste */}
-        <div className="rounded-xl bg-white shadow-sm border border-gray-100 overflow-hidden">
-          <div className="px-6 py-4 border-b border-gray-100">
-            <h3 className="text-lg font-medium text-gray-900">Zahlungshistorie</h3>
-          </div>
-          <div className="divide-y divide-gray-100">
-            {sortedList.length === 0 ? (
-              <p className="text-center text-gray-500 py-8">Noch keine Daten.</p>
-            ) : (
-              sortedList.map((item) => (
-                <div key={item.id} className="px-6 py-4 flex justify-between items-center hover:bg-gray-50 transition group">
-                  <div>
-                    <p className="font-medium text-gray-900">{item.name}</p>
-                    <p className="text-xs text-gray-500">{item.isin} • {new Date(item.pay_date).toLocaleDateString('de-DE')}</p>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <span className="font-bold text-green-600 bg-green-50 px-3 py-1 rounded-full text-sm">
-                      +{item.amount?.toFixed(2)} €
-                    </span>
-                    <button 
-                      onClick={() => handleDelete(item.id)}
-                      className="text-gray-400 hover:text-red-600 p-2 rounded-full hover:bg-red-50 transition-colors opacity-0 group-hover:opacity-100"
-                      title="Löschen"
-                    >
-                      🗑️
-                    </button>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-      </main>
-    </div>
-  )
-}
+                  contentStyle={{ borderRadius
