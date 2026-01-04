@@ -161,7 +161,7 @@ export default function Dashboard() {
                 <Tooltip 
                   cursor={{fill: '#F3F4F6'}}
                   contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                  formatter={(value: number) => [`${value.toFixed(2)} €`, 'Betrag']}
+                  formatter={(value: any) => [`${value.toFixed(2)} €`, 'Betrag']}
                   labelFormatter={(label) => `Datum: ${label}`}
                 />
                 <Bar dataKey="amount" radius={[4, 4, 0, 0]}>
