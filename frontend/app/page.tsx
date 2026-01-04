@@ -1,237 +1,219 @@
-"use client";
-import { useState, useEffect } from "react";
-import { Upload, CheckCircle, AlertCircle, FileText, DollarSign, Calendar, History, TrendingUp, Info, BarChart3 } from "lucide-react";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+'use client'
 
-export default function Home() {
-  const [loading, setLoading] = useState(false);
-  const [uploadData, setUploadData] = useState<any>(null);
-  const [history, setHistory] = useState<any[]>([]);
-  const [error, setError] = useState("");
+import { useEffect, useState, useRef } from 'react'
+import { createClient } from '@/utils/supabase/client'
+import { useRouter } from 'next/navigation'
+// Das hier ist neu für das Diagramm:
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
+
+export default function Dashboard() {
+  const [user, setUser] = useState<any>(null)
+  const [dividends, setDividends] = useState<any[]>([])
+  const [uploading, setUploading] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  
+  const supabase = createClient()
+  const router = useRouter()
+
+  const fetchDividends = async () => {
+    const { data } = await supabase
+      .from('dividends')
+      .select('*')
+      .order('pay_date', { ascending: true }) // Für das Diagramm brauchen wir es chronologisch (alt nach neu)
+
+    if (data) setDividends(data)
+  }
 
   useEffect(() => {
-    fetchHistory();
-  }, []);
-
-  const fetchHistory = async () => {
-    try {
-      const res = await fetch("https://diviflow-backend.onrender.com/api/dividends");
-      const json = await res.json();
-      if (json.status === "success") {
-        setHistory(json.data);
-      }
-    } catch (err) {
-      console.error("Konnte Historie nicht laden", err);
+    const getUser = async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      setUser(user)
+      if (user) fetchDividends()
     }
-  };
-
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files?.[0]) return;
-
-    setLoading(true);
-    setError("");
-    setUploadData(null);
-
-    const file = e.target.files[0];
-    const formData = new FormData();
-    formData.append("file", file);
-
-    try {
-      const res = await fetch("http://127.0.0.1:8000/api/upload", {
-        method: "POST",
-        body: formData,
-      });
-
-      const result = await res.json();
-      
-      if (result.status === "success") {
-        setUploadData({ ...result.data, status: "new" });
-        fetchHistory();
-      } else if (result.status === "skipped") {
-        setUploadData({ ...result.data, status: "skipped" });
-      } else {
-        setError(result.message || "Fehler beim Lesen.");
-      }
-    } catch (err) {
-      setError("Server nicht erreichbar.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // --- CHART LOGIK ---
-  const chartData = history.reduce((acc: any[], curr) => {
-    const date = new Date(curr.pay_date);
-    const monthKey = date.toLocaleString('de-DE', { month: 'short', year: '2-digit' });
-    
-    const existing = acc.find(item => item.name === monthKey);
-    
-    if (existing) {
-      existing.value += curr.amount;
-    } else {
-      acc.push({ 
-        name: monthKey, 
-        value: curr.amount, 
-        timestamp: date.getTime() 
-      }); 
-    }
-    return acc;
+    getUser()
   }, [])
-  .sort((a, b) => a.timestamp - b.timestamp);
 
-  const totalDividends = history.reduce((sum, item) => sum + item.amount, 0);
+  const handleLogout = async () => {
+    await supabase.auth.signOut()
+    router.refresh() 
+  }
+
+  const handleDelete = async (id: string) => {
+    if (!confirm('Diesen Eintrag wirklich löschen?')) return
+
+    try {
+      const { error } = await supabase.from('dividends').delete().eq('id', id)
+      if (error) throw error
+      setMessage("🗑️ Eintrag gelöscht.")
+      setTimeout(() => setMessage(null), 3000)
+      fetchDividends()
+    } catch (error: any) {
+      alert('Fehler beim Löschen: ' + error.message)
+    }
+  }
+
+  const handleButtonClick = () => {
+    fileInputRef.current?.click()
+  }
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setUploading(true)
+    setMessage(null)
+    const formData = new FormData()
+    formData.append('file', file)
+
+    try {
+      const response = await fetch('/api/upload', { method: 'POST', body: formData })
+      const result = await response.json()
+      
+      // Wenn es nur eine Warnung ist (Duplikat), zeigen wir sie gelb an, aber laden nicht neu
+      if (result.message && result.message.includes('⚠️')) {
+         setMessage(result.message)
+         setTimeout(() => setMessage(null), 5000)
+      } else if (!response.ok) {
+        throw new Error(result.error)
+      } else {
+        // Echter Erfolg
+        fetchDividends()
+        setMessage("✅ " + result.message)
+        setTimeout(() => setMessage(null), 5000)
+      }
+
+    } catch (error: any) {
+      alert('Fehler: ' + error.message)
+    } finally {
+      setUploading(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+  const totalAmount = dividends.reduce((sum, item) => sum + (item.amount || 0), 0)
+
+  // Daten für das Diagramm aufbereiten (Datum schön kurz machen)
+  const chartData = dividends.map(item => ({
+    ...item,
+    shortDate: new Date(item.pay_date).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }),
+    fullDate: new Date(item.pay_date).toLocaleDateString('de-DE')
+  }))
+
+  // Liste für die Anzeige unten wieder umdrehen (damit Neueste oben stehen)
+  const sortedList = [...dividends].sort((a, b) => new Date(b.pay_date).getTime() - new Date(a.pay_date).getTime())
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans p-8">
-      <div className="max-w-4xl mx-auto">
+    <div className="min-h-screen bg-gray-50">
+      <nav className="bg-white shadow-sm">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className="flex h-16 justify-between items-center">
+            <h1 className="text-2xl font-bold text-blue-600">DiviFlow</h1>
+            <div className="flex items-center gap-4">
+              <span className="text-sm text-gray-500">{user ? `Moin, ${user.email}` : '...'}</span>
+              <button onClick={handleLogout} className="bg-gray-100 px-3 py-2 rounded text-sm hover:bg-gray-200">Abmelden</button>
+            </div>
+          </div>
+        </div>
+      </nav>
+
+      <main className="mx-auto max-w-7xl py-10 px-4">
         
-        <header className="mb-8 text-center">
-          <h1 className="text-4xl font-extrabold text-blue-600 tracking-tight">DiviFlow</h1>
-          <p className="text-slate-500 mt-2">Dein Cashflow Dashboard</p>
-        </header>
+        {/* KPI Bereich */}
+        <div className="grid grid-cols-1 gap-6 sm:grid-cols-3 mb-8">
+          <div className="rounded-xl bg-white p-6 shadow-sm border border-gray-100">
+            <p className="text-gray-500 text-sm font-medium uppercase">Gesamt Netto</p>
+            <p className="mt-2 text-3xl font-bold text-gray-900">{totalAmount.toFixed(2)} €</p>
+          </div>
+          <div className="rounded-xl bg-white p-6 shadow-sm border border-gray-100">
+            <p className="text-gray-500 text-sm font-medium uppercase">Anzahl Zahlungen</p>
+            <p className="mt-2 text-3xl font-bold text-gray-900">{dividends.length}</p>
+          </div>
+          <div className="flex items-center justify-center rounded-xl bg-blue-50 p-6 border-2 border-dashed border-blue-200 hover:bg-blue-100 transition-colors cursor-pointer relative" onClick={handleButtonClick}>
+             <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept="application/pdf" />
+             <div className="flex flex-col items-center text-blue-600">
+                <span className="text-2xl mb-1">{uploading ? '⏳' : '📄'}</span>
+                <span className="font-medium">{uploading ? 'Verarbeite...' : 'PDF Hochladen'}</span>
+             </div>
+          </div>
+        </div>
 
-        {/* --- KPI CARDS --- */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex flex-col justify-between">
-                <div className="flex items-center gap-3 text-slate-500 mb-2">
-                    <TrendingUp className="w-5 h-5" />
-                    <span className="text-sm font-bold uppercase tracking-wider">Gesamt Netto</span>
-                </div>
-                <div className="text-3xl font-extrabold text-slate-900">{totalDividends.toFixed(2)} €</div>
-            </div>
-
-            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex flex-col justify-between">
-                 <div className="flex items-center gap-3 text-slate-500 mb-2">
-                    <CheckCircle className="w-5 h-5" />
-                    <span className="text-sm font-bold uppercase tracking-wider">Zahlungen</span>
-                </div>
-                <div className="text-3xl font-extrabold text-slate-900">{history.length}</div>
-            </div>
-
-             <label className="bg-blue-600 hover:bg-blue-700 transition-colors p-6 rounded-2xl shadow-lg shadow-blue-200 cursor-pointer text-white flex flex-col items-center justify-center gap-2 group relative overflow-hidden">
-                <input 
-                    type="file" 
-                    accept=".pdf" 
-                    className="hidden" 
-                    onChange={handleFileUpload} 
-                    disabled={loading}
+        {/* NEU: Das Diagramm */}
+        {dividends.length > 0 && (
+          <div className="mb-8 rounded-xl bg-white p-6 shadow-sm border border-gray-100 h-80">
+            <h3 className="text-lg font-medium text-gray-900 mb-4">Verlauf</h3>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={chartData}>
+                <XAxis 
+                  dataKey="shortDate" 
+                  stroke="#9CA3AF" 
+                  fontSize={12} 
+                  tickLine={false} 
+                  axisLine={false} 
                 />
-                <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
-                <Upload className="w-8 h-8 group-hover:scale-110 transition-transform" />
-                <span className="font-bold">{loading ? "Analysiere..." : "PDF Hochladen"}</span>
-             </label>
-        </div>
-
-        {/* --- CHART SECTION --- */}
-        {chartData.length > 0 && (
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 mb-8 animate-in fade-in slide-in-from-bottom-4">
-                <div className="flex items-center gap-2 mb-6">
-                    <BarChart3 className="w-5 h-5 text-blue-500" />
-                    <h3 className="font-bold text-slate-700">Monatlicher Cashflow</h3>
-                </div>
-                <div className="h-64 w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={chartData}>
-                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                            <XAxis 
-                                dataKey="name" 
-                                tick={{fill: '#64748b', fontSize: 12}} 
-                                axisLine={false} 
-                                tickLine={false} 
-                            />
-                            <YAxis 
-                                tick={{fill: '#64748b', fontSize: 12}} 
-                                axisLine={false} 
-                                tickLine={false}
-                                tickFormatter={(value) => `${value}€`}
-                            />
-                            <Tooltip 
-                                contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}}
-                                cursor={{fill: '#f1f5f9'}}
-                            />
-                            <Bar 
-                                dataKey="value" 
-                                fill="#3b82f6" 
-                                radius={[4, 4, 0, 0]} 
-                                barSize={40}
-                            />
-                        </BarChart>
-                    </ResponsiveContainer>
-                </div>
-            </div>
+                <YAxis 
+                  stroke="#9CA3AF" 
+                  fontSize={12} 
+                  tickLine={false} 
+                  axisLine={false} 
+                  tickFormatter={(value) => `${value}€`} 
+                />
+                <Tooltip 
+                  cursor={{fill: '#F3F4F6'}}
+                  contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                  formatter={(value: number) => [`${value.toFixed(2)} €`, 'Betrag']}
+                  labelFormatter={(label) => `Datum: ${label}`}
+                />
+                <Bar dataKey="amount" radius={[4, 4, 0, 0]}>
+                  {chartData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill="#3B82F6" />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
         )}
 
-        {/* --- STATUS MESSAGES --- */}
-        {error && (
-            <div className="mb-8 p-4 bg-red-50 text-red-600 rounded-lg flex items-center gap-2">
-              <AlertCircle className="w-5 h-5" />
-              {error}
-            </div>
+        {/* Status Meldung */}
+        {message && (
+          <div className={`mb-6 p-4 rounded-md border animate-pulse ${message.includes('🗑️') ? 'bg-red-50 text-red-700 border-red-200' : message.includes('⚠️') ? 'bg-yellow-50 text-yellow-700 border-yellow-200' : 'bg-green-50 text-green-700 border-green-200'}`}>
+            {message}
+          </div>
         )}
 
-        {uploadData && (
-            <div className={`mb-8 px-4 py-3 rounded-lg flex items-center gap-2 animate-in fade-in slide-in-from-top-2 border ${
-              uploadData.status === "skipped" 
-                ? "bg-blue-50 border-blue-200 text-blue-800" 
-                : "bg-green-50 border-green-200 text-green-800"
-            }`}>
-              {uploadData.status === "skipped" ? <Info className="w-5 h-5" /> : <CheckCircle className="w-5 h-5" />}
-              <span>
-                {uploadData.status === "skipped" ? "Bereits erfasst: " : "Erfolgreich gespeichert: "}
-                {/* HIER AUCH UPDATE: Name anzeigen in der Success Message */}
-                <strong>{uploadData.amount.toFixed(2)} €</strong> von {uploadData.name || uploadData.isin}
-              </span>
-            </div>
-        )}
-
-        {/* --- HISTORIE LISTE --- */}
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-            <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex items-center gap-2">
-                <History className="w-5 h-5 text-slate-500" />
-                <h2 className="font-semibold text-slate-700">Deine Zahlungen</h2>
-            </div>
-            
-            {history.length === 0 ? (
-                <div className="p-8 text-center text-slate-400">Lade deine erste Abrechnung hoch, um zu starten!</div>
+        {/* Die Liste */}
+        <div className="rounded-xl bg-white shadow-sm border border-gray-100 overflow-hidden">
+          <div className="px-6 py-4 border-b border-gray-100">
+            <h3 className="text-lg font-medium text-gray-900">Zahlungshistorie</h3>
+          </div>
+          <div className="divide-y divide-gray-100">
+            {sortedList.length === 0 ? (
+              <p className="text-center text-gray-500 py-8">Noch keine Daten.</p>
             ) : (
-                <table className="w-full text-left">
-                    <thead className="bg-slate-50 text-slate-500 text-xs uppercase font-semibold">
-                        <tr>
-                            <th className="px-6 py-3">Datum</th>
-                            <th className="px-6 py-3">Asset</th>
-                            <th className="px-6 py-3 text-right">Betrag</th>
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                        {history.map((item) => (
-                            <tr key={item.id} className="hover:bg-slate-50 transition-colors">
-                                <td className="px-6 py-4 text-slate-500 text-sm font-mono">
-                                    {new Date(item.pay_date).toLocaleDateString('de-DE')}
-                                </td>
-                                
-                                {/* HIER IST DER FIX FÜR DEN NAMEN: */}
-                                <td className="px-6 py-4 font-medium text-slate-800">
-                                    {/* Zeige Name wenn da, sonst ISIN */}
-                                    <div className="text-base font-bold text-slate-800">
-                                        {item.name || item.isin}
-                                    </div>
-                                    {/* ISIN klein darunter */}
-                                    <div className="text-xs text-slate-400 font-mono mt-0.5">
-                                        {item.isin} • {item.broker}
-                                    </div>
-                                </td>
-
-                                <td className="px-6 py-4 text-right font-bold text-green-600">
-                                    +{item.amount.toFixed(2)} €
-                                </td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
+              sortedList.map((item) => (
+                <div key={item.id} className="px-6 py-4 flex justify-between items-center hover:bg-gray-50 transition group">
+                  <div>
+                    <p className="font-medium text-gray-900">{item.name}</p>
+                    <p className="text-xs text-gray-500">{item.isin} • {new Date(item.pay_date).toLocaleDateString('de-DE')}</p>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <span className="font-bold text-green-600 bg-green-50 px-3 py-1 rounded-full text-sm">
+                      +{item.amount?.toFixed(2)} €
+                    </span>
+                    <button 
+                      onClick={() => handleDelete(item.id)}
+                      className="text-gray-400 hover:text-red-600 p-2 rounded-full hover:bg-red-50 transition-colors opacity-0 group-hover:opacity-100"
+                      title="Löschen"
+                    >
+                      🗑️
+                    </button>
+                  </div>
+                </div>
+              ))
             )}
+          </div>
         </div>
-
-      </div>
+      </main>
     </div>
-  );
+  )
 }
