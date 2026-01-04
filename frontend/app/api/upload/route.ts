@@ -31,36 +31,35 @@ export async function POST(request: NextRequest) {
       parser.parseBuffer(buffer)
     })
 
-    // --- DEBUGGING: Zeig uns, was du liest! ---
+    // --- DEBUGGING (Lassen wir drin, falls noch was ist) ---
     console.log('--- START PDF TEXT ---')
     console.log(pdfText)
     console.log('--- ENDE PDF TEXT ---')
 
-    // Erweiterte Suche (Jetzt auch Gutschrift, Summe, etc.)
+    // Erweiterte Suche: Jetzt auch mit "GESAMT" für Trade Republic!
     const amountMatch = pdfText.match(/Betrag\s*([\d,.]+)\s*EUR/i) || 
                         pdfText.match(/Nettobetrag\s*([\d,.]+)\s*EUR/i) ||
                         pdfText.match(/Ausmachung\s*([\d,.]+)\s*EUR/i) ||
                         pdfText.match(/Endbetrag\s*([\d,.]+)\s*EUR/i) ||
                         pdfText.match(/Gutschrift\s*([\d,.]+)\s*EUR/i) || 
                         pdfText.match(/Auszahlung\s*([\d,.]+)\s*EUR/i) ||
-                        pdfText.match(/Summe\s*([\d,.]+)\s*EUR/i)
+                        pdfText.match(/Summe\s*([\d,.]+)\s*EUR/i) ||
+                        pdfText.match(/GESAMT\s*([\d,.]+)\s*EUR/i) // <--- DAS IST NEU!
 
-    // Datumssuche (Jetzt auch Valuta, Zahltag)
+    // Datumssuche
     const dateMatch = pdfText.match(/Valuta\s*(\d{2}\.\d{2}\.\d{4})/) ||
                       pdfText.match(/Datum\s*(\d{2}\.\d{2}\.\d{4})/) ||
                       pdfText.match(/Zahltag\s*(\d{2}\.\d{2}\.\d{4})/) ||
-                      pdfText.match(/(\d{2}\.\d{2}\.\d{4})/) // Fallback: Erstes Datum finden
+                      pdfText.match(/(\d{2}\.\d{2}\.\d{4})/) 
 
     const isinMatch = pdfText.match(/([A-Z]{2}[A-Z0-9]{9}\d)/)
 
     if (!amountMatch) {
-        // Wir geben den Fehler zurück, aber loggen ihn vorher
         console.log("FEHLER: Kein Betrag gefunden!")
-        return NextResponse.json({ error: 'Konnte keinen Betrag im PDF finden. Check die Logs!' }, { status: 400 })
+        return NextResponse.json({ error: 'Konnte keinen Betrag im PDF finden. (Code: GESAMT fehlt)' }, { status: 400 })
     }
 
     // Werte extrahieren und bereinigen
-    // Entferne Tausenderpunkte (1.000,00 -> 1000,00) und mache Komma zu Punkt
     let rawAmount = amountMatch[1]
     if (rawAmount.includes('.') && rawAmount.includes(',')) {
         rawAmount = rawAmount.replace('.', '') // Tausender weg
@@ -75,11 +74,13 @@ export async function POST(request: NextRequest) {
 
     const isin = isinMatch ? isinMatch[1] : 'Unbekannt'
     
+    // Name raten
     let name = 'Dividende'
     if (pdfText.includes('Apple')) name = 'Apple Inc.'
     if (pdfText.includes('Microsoft')) name = 'Microsoft Corp.'
     if (pdfText.includes('Coca-Cola')) name = 'Coca-Cola'
-    // Hier kannst du später mehr Namen ergänzen
+    if (pdfText.includes('Realty Income')) name = 'Realty Income'
+    if (pdfText.includes('Unilever')) name = 'Unilever'
 
     // Check auf Duplikate
     const { data: existing } = await supabase
