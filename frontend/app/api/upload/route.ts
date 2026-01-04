@@ -12,7 +12,6 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    // --- ÄNDERUNG: Wir lesen jetzt JSON statt FormData ---
     const body = await request.json()
     const { fileData, fileName } = body
 
@@ -20,55 +19,67 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Keine Datei empfangen' }, { status: 400 })
     }
 
-    // Die Datei kommt als "data:application/pdf;base64,JVBERi0xLjQK..."
-    // Wir müssen den vorderen Teil abschneiden, um den reinen Inhalt zu bekommen
     const base64Content = fileData.split(';base64,').pop()
     const buffer = Buffer.from(base64Content, 'base64')
 
-    // --- Ab hier ist alles wie vorher (PDF Parsing) ---
-    
     // PDF Parsing
     const parser = new PDFParser(null, true)
 
     const pdfText = await new Promise<string>((resolve, reject) => {
       parser.on("pdfParser_dataError", (errData: any) => reject(errData.parserError))
       parser.on("pdfParser_dataReady", () => resolve(parser.getRawTextContent()))
-      
-      // Den Buffer direkt parsen
       parser.parseBuffer(buffer)
     })
 
-    // Regex Suche (wie vorher)
+    // --- DEBUGGING: Zeig uns, was du liest! ---
+    console.log('--- START PDF TEXT ---')
+    console.log(pdfText)
+    console.log('--- ENDE PDF TEXT ---')
+
+    // Erweiterte Suche (Jetzt auch Gutschrift, Summe, etc.)
     const amountMatch = pdfText.match(/Betrag\s*([\d,.]+)\s*EUR/i) || 
                         pdfText.match(/Nettobetrag\s*([\d,.]+)\s*EUR/i) ||
                         pdfText.match(/Ausmachung\s*([\d,.]+)\s*EUR/i) ||
-                        pdfText.match(/Endbetrag\s*([\d,.]+)\s*EUR/i)
+                        pdfText.match(/Endbetrag\s*([\d,.]+)\s*EUR/i) ||
+                        pdfText.match(/Gutschrift\s*([\d,.]+)\s*EUR/i) || 
+                        pdfText.match(/Auszahlung\s*([\d,.]+)\s*EUR/i) ||
+                        pdfText.match(/Summe\s*([\d,.]+)\s*EUR/i)
 
+    // Datumssuche (Jetzt auch Valuta, Zahltag)
     const dateMatch = pdfText.match(/Valuta\s*(\d{2}\.\d{2}\.\d{4})/) ||
-                      pdfText.match(/Datum\s*(\d{2}\.\d{2}\.\d{4})/)
+                      pdfText.match(/Datum\s*(\d{2}\.\d{2}\.\d{4})/) ||
+                      pdfText.match(/Zahltag\s*(\d{2}\.\d{2}\.\d{4})/) ||
+                      pdfText.match(/(\d{2}\.\d{2}\.\d{4})/) // Fallback: Erstes Datum finden
 
     const isinMatch = pdfText.match(/([A-Z]{2}[A-Z0-9]{9}\d)/)
 
     if (!amountMatch) {
-        return NextResponse.json({ error: 'Konnte keinen Betrag im PDF finden.' }, { status: 400 })
+        // Wir geben den Fehler zurück, aber loggen ihn vorher
+        console.log("FEHLER: Kein Betrag gefunden!")
+        return NextResponse.json({ error: 'Konnte keinen Betrag im PDF finden. Check die Logs!' }, { status: 400 })
     }
 
-    // Werte extrahieren
-    const rawAmount = amountMatch[1].replace('.', '').replace(',', '.')
+    // Werte extrahieren und bereinigen
+    // Entferne Tausenderpunkte (1.000,00 -> 1000,00) und mache Komma zu Punkt
+    let rawAmount = amountMatch[1]
+    if (rawAmount.includes('.') && rawAmount.includes(',')) {
+        rawAmount = rawAmount.replace('.', '') // Tausender weg
+    }
+    rawAmount = rawAmount.replace(',', '.') // Komma zu Punkt
+    
     const amount = parseFloat(rawAmount)
     
     const rawDate = dateMatch ? dateMatch[1] : new Date().toLocaleDateString('de-DE')
-    // Datum umwandeln von DD.MM.YYYY zu YYYY-MM-DD
     const [day, month, year] = rawDate.split('.')
     const isoDate = `${year}-${month}-${day}`
 
     const isin = isinMatch ? isinMatch[1] : 'Unbekannt'
     
-    // Name raten (Optional)
     let name = 'Dividende'
     if (pdfText.includes('Apple')) name = 'Apple Inc.'
     if (pdfText.includes('Microsoft')) name = 'Microsoft Corp.'
-    if (pdfText.includes('Realty Income')) name = 'Realty Income'
+    if (pdfText.includes('Coca-Cola')) name = 'Coca-Cola'
+    // Hier kannst du später mehr Namen ergänzen
 
     // Check auf Duplikate
     const { data: existing } = await supabase
@@ -83,7 +94,6 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ message: `⚠️ Diese Dividende (${amount} €) existiert schon!` })
     }
 
-    // In Datenbank speichern
     const { error: insertError } = await supabase
         .from('dividends')
         .insert({
