@@ -193,6 +193,10 @@ export default function Dashboard() {
                   axisLine={false} 
                   tickFormatter={(value) => `${value}€`} 
                 />
-                <Tooltip 
-                  cursor={{fill: '#F3F4F6'}}
-                  contentStyle={{ borderRadius
+                
+		<Tooltip 
+  			cursor={{fill: '#F3F4F6'}}
+			contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 				6px -1px rgb(0 0 0 / 0.1)' }}
+			formatter={(value: any) => [`${Number(value).toFixed(2)} €`, 'Betrag']}
+			labelFormatter={(label: any) => `Datum: ${label}`}
+		/>
